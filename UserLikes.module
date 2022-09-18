@@ -1,0 +1,123 @@
+<?php namespace ProcessWire;
+
+/**
+ * This module was made for demonstration and it's working as intended.
+ * 
+ * For more information, see this thread:
+ *  https://processwire.com/talk/topic/16918-like-page-photo-for-logged-in-user/
+ *      and
+ *  https://processwire.com/talk/topic/27514-suggestions-on-implementing-a-pinterest-like-save-button/#comment-226876
+ */
+
+class UserLikes extends WireData implements Module {
+
+    const minVersion = '3.0.0';
+    protected $tableName = 'likes_system';
+
+    public static function getModuleInfo()
+    {
+        return [
+            'title' => 'UserLikes',
+            'version' => '1.0.0',
+            'summary' => 'Likes System for ProcessWire linked to user.',
+            'author' => 'flydev',
+            'href' => 'https://processwire.com',
+            'singular' => false,
+            'autoload' => false,
+            'icon' => 'thumbs-up',
+            'requires' => [
+                'ProcessWire>=3.0.0'
+            ]
+        ];
+    }
+
+    protected function createTable() {
+
+        $sql =  "CREATE TABLE IF NOT EXISTS " . $this->tableName . " ( " .
+                "id int unsigned AUTO_INCREMENT PRIMARY KEY, " .
+                "userId int unsigned NOT NULL, " .
+                "pageId int unsigned NOT NULL, " .
+                "likes boolean NOT NULL," .
+                "ts timestamp NULL DEFAULT CURRENT_TIMESTAMP, " .
+                "UNIQUE KEY userId_pageId (userId, pageId)".
+                ")";
+        $this->database->exec($sql);
+    }
+
+    public function ___install() {
+
+        if (version_compare($this->config->version, self::minVersion, '<'))
+            throw new WireException("This module requires ProcessWire " . self::minVersion . " or newer.");
+
+        $this->createTable();
+    }
+
+    public function ___uninstall() {
+        $sql = "DROP TABLE IF EXISTS " . $this->tableName;
+        $this->database->exec($sql);
+    }
+
+    public function init() {
+        // check if the button 'like' as been clicked
+        if(wire('input')->post->likethispage) {
+            $status = (wire('input')->post->likethispage === 'like') ? 1 : 0;
+            $this->likePage($status);
+        }
+    }
+
+    // Like or unlike a page
+    protected function likePage($status) {
+        $userId = wire('user')->id;
+        $sql = "INSERT INTO " . $this->tableName . "(userId, pageId, likes) VALUES ('".$userId."', '".wire('page')->id. "', '" . $status . "')
+                ON DUPLICATE KEY UPDATE 
+                likes = $status,
+                ts = CURRENT_TIMESTAMP;";
+        $this->database->exec($sql);
+    }
+
+    // get the total of like of $pageId or current page
+    public function getTotal($pageId = '') {
+        $pageId = empty($pageId) ? wire('page')->id : $pageId;
+        $sql = "SELECT pageId FROM " . $this->tableName . " WHERE pageId = '" . $pageId . "' and likes = '1';";
+        $res = $this->database->query($sql);
+        $row = $res->fetchAll();
+        return count($row);
+    }
+
+    // get the most liked page, if $limit is defined, it return the N most liked page
+    public function getMostLikedPage($limit = 5) {
+        $sql = "SELECT pageId, count(pageId) as likesCount FROM " . $this->tableName .
+               " WHERE likes='1' GROUP BY pageId ORDER BY likesCount DESC LIMIT $limit;";
+        $res = $this->database->query($sql);
+        $row = $res->fetchAll();
+
+        return $row;
+    }
+
+    public function render() {
+
+        $modules = wire('modules');
+
+        $sql = "SELECT pageId, likes FROM " . $this->tableName . " WHERE pageId = '" . wire('page')->id . "' and userId = '". wire('user')->id ."';";
+        $res = $this->database->query($sql);
+        $row = $res->fetch();
+        $label = 'like';
+        if($row && count($row)) {
+            if($row['likes'] == 1) $label = 'unlike';
+        }
+
+        $form = $modules->get("InputfieldForm");
+        $form->action = './';
+        $form->method = 'post';
+        $form->attr('id+name', 'likeSystemForm');
+
+        $field = $modules->get("InputfieldSubmit");
+        $field->value = $label;
+        $field->icon = "thumbs-up";
+        $field->attr('id+name', 'likethispage');
+
+        $form->append($field);
+
+        return $form->render();
+    }
+}
